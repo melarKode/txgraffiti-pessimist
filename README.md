@@ -37,8 +37,16 @@ harmonic index $H(G) = \sum_{uv\in E}\frac{2}{\deg u + \deg v}$.
 | **3** | 2020 | $i(G) \le \mu^*(G)$ | $r$-regular, $r>0$ |
 | **4** | 2023 | $\mu^*(G) \le H(G)$ | nontrivial connected $G$ |
 
-This repository **actively searches Conjecture 4** ($\mu^* \le H$); the other three are
-formalised in Lean and are the search targets of the teammates' branches.
+The team runs the Pessimist against **three of these conjectures**, one per member, each
+plugging a conjecture-specific reward into the shared search engine:
+
+- **Conjecture 1** ($\alpha \ge (a+R)/\Delta$) — Tridiv
+- **Conjecture 3** ($i \le \mu^*$) — Shubhashish
+- **Conjecture 4** ($\mu^* \le H$) — Navneet
+
+All four conjectures (including Conjecture 2) are also stated formally in Lean. The
+Conjecture 4 search is fully written up below; Conjectures 1 and 3 are searched on the
+teammates' branches with the same engine and reporting format.
 
 ---
 
