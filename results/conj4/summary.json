@@ -2,15 +2,24 @@
   "conjecture": "Conjecture 4 (arXiv 2507.17780): mu*(G) <= H(G), nontrivial connected G",
   "reward": "mu*(G) - H(G); positive == counterexample",
   "params": {
-    "ns": [
+    "requested_ns": [
       4,
       5,
-      6
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14
     ],
-    "seeds": 2,
-    "iters": 10,
-    "batch": 50,
-    "seed": 0
+    "seeds": 10,
+    "iters": 50,
+    "batch": 200,
+    "seed": 0,
+    "budget_seconds_per_n": 600.0
   },
   "per_n": {
     "4": {
@@ -41,7 +50,8 @@
           3
         ]
       ],
-      "graphs_searched": 1000
+      "graphs_searched": 100000,
+      "seconds": 7.4
     },
     "5": {
       "max_reward": -0.2571428571428567,
@@ -52,7 +62,42 @@
         ],
         [
           0,
+          2
+        ],
+        [
+          0,
           3
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          1,
+          3
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          4
+        ]
+      ],
+      "graphs_searched": 100000,
+      "seconds": 6.6
+    },
+    "6": {
+      "max_reward": 0.0,
+      "best_edges": [
+        [
+          0,
+          1
+        ],
+        [
+          0,
+          2
         ],
         [
           0,
@@ -64,21 +109,69 @@
         ],
         [
           1,
-          4
+          5
         ],
         [
           2,
-          4
+          3
+        ],
+        [
+          2,
+          5
         ],
         [
           3,
           4
+        ],
+        [
+          4,
+          5
         ]
       ],
-      "graphs_searched": 1000
+      "graphs_searched": 100000,
+      "seconds": 8.9
     },
-    "6": {
-      "max_reward": -0.4166666666666665,
+    "7": {
+      "max_reward": -0.0952380952380949,
+      "best_edges": [
+        [
+          0,
+          2
+        ],
+        [
+          0,
+          6
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          1,
+          4
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          2,
+          5
+        ],
+        [
+          2,
+          6
+        ],
+        [
+          3,
+          5
+        ]
+      ],
+      "graphs_searched": 100000,
+      "seconds": 359.0
+    },
+    "8": {
+      "max_reward": -0.08333333333333348,
       "best_edges": [
         [
           0,
@@ -101,23 +194,33 @@
           5
         ],
         [
-          1,
+          0,
+          6
+        ],
+        [
+          0,
+          7
+        ],
+        [
+          2,
           3
         ],
         [
-          1,
-          4
+          4,
+          7
         ],
         [
-          3,
-          4
+          5,
+          6
         ]
       ],
-      "graphs_searched": 1000
+      "graphs_searched": 100000,
+      "seconds": 564.3
     }
   },
-  "total_graphs_searched": 3000,
+  "total_graphs_searched": 500000,
   "global_best_reward": 2.220446049250313e-16,
   "counterexample_found": false,
-  "distinct_equality_cases": 2
+  "distinct_equality_cases": 3,
+  "actual_cap": 8
 }

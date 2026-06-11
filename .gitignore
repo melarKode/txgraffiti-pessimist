@@ -4,6 +4,7 @@ __pycache__/
 .DS_Store
 .lake/
 results/*.png
+results/conj4/run.log
 lean/.lake/
 lean/build/
 *.olean

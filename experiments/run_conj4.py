@@ -18,9 +18,12 @@ import argparse
 import datetime as dt
 import json
 import os
+import random
 import sys
+import time
 
 import matplotlib
+import numpy as np
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -35,7 +38,7 @@ for sub in ("src", "conjectures"):
 
 import invariants as inv  # noqa: E402
 import conj4_minmaxmatching_harmonic as conj4  # noqa: E402
-from search import run_search  # noqa: E402
+from search import run_cem  # noqa: E402
 
 OUTDIR = os.path.join(ROOT, "results", "conj4")
 
@@ -145,13 +148,41 @@ def make_scatter(points, path):
 # --------------------------------------------------------------------------- #
 # Driver
 # --------------------------------------------------------------------------- #
-def run(ns, seeds, iters, batch, seed, progress=True):
+def _run_one_n(n, seeds, iters, batch, seed, budget_seconds, progress):
+    """Run `seeds` CEM restarts for a single n, aborting as soon as the *cumulative*
+    wall time for this n crosses budget_seconds. Returns (per_seed_results, elapsed,
+    over_budget). On abort, per_seed_results holds only the restarts that finished."""
+    random.seed(seed + n)
+    np.random.seed(seed + n)
+    child_seeds = np.random.SeedSequence(seed + n).spawn(seeds)
+
+    per_seed = []
+    t0 = time.time()
+    over_budget = False
+    for k, ss in enumerate(child_seeds):
+        rng = np.random.default_rng(ss)
+        res = run_cem(n, conj4.reward, iters=iters, batch=batch, rng=rng,
+                      progress=progress, desc=f"n={n} seed={k}")
+        per_seed.append(res)
+        if time.time() - t0 > budget_seconds:
+            over_budget = True
+            break
+    return per_seed, time.time() - t0, over_budget
+
+
+def run(ns, seeds, iters, batch, seed, progress=True, budget_seconds=600):
+    """Run the Pessimist over the given n's. Any n whose full multi-restart search
+    exceeds budget_seconds (default 10 min) is treated as over the cap: it is NOT
+    recorded, the search stops, and the documented cap becomes the previous n. This
+    is the explicit, non-silent truncation the experiment protocol calls for."""
     os.makedirs(OUTDIR, exist_ok=True)
+    ns = list(ns)
 
     summary = {
         "conjecture": "Conjecture 4 (arXiv 2507.17780): mu*(G) <= H(G), nontrivial connected G",
         "reward": "mu*(G) - H(G); positive == counterexample",
-        "params": {"ns": list(ns), "seeds": seeds, "iters": iters, "batch": batch, "seed": seed},
+        "params": {"requested_ns": ns, "seeds": seeds, "iters": iters, "batch": batch,
+                   "seed": seed, "budget_seconds_per_n": budget_seconds},
         "per_n": {},
         "total_graphs_searched": 0,
         "global_best_reward": None,
@@ -161,12 +192,21 @@ def run(ns, seeds, iters, batch, seed, progress=True):
     equality = {}          # wl_hash -> edge list
     scatter_points = []    # (H, mustar, is_equality)
     global_best_reward = -float("inf")
+    per_n_times = {}       # n -> seconds (recorded n only)
+    actual_cap = None
+    aborted_n = None
 
     for n in ns:
-        best, per_seed = run_search(
-            n, conj4.reward, iters=iters, batch=batch, seeds=seeds,
-            seed=seed + n, progress=progress,
+        per_seed, elapsed, over_budget = _run_one_n(
+            n, seeds, iters, batch, seed, budget_seconds, progress
         )
+
+        if over_budget:
+            # This n blew the 10-minute budget: do not record it; cap at n-1 and stop.
+            aborted_n = n
+            print(f"n={n:2d}: ABORTED after {elapsed:.0f}s (> {budget_seconds}s budget); "
+                  f"capping at n={n - 1}.")
+            break
 
         for k, res in enumerate(per_seed):
             with open(os.path.join(OUTDIR, f"log_n{n:02d}_seed{k}.json"), "w") as f:
@@ -184,12 +224,16 @@ def run(ns, seeds, iters, batch, seed, progress=True):
                     scatter_points.append((H, mu, True))
 
         max_reward_n = max(r.best_reward for r in per_seed)
+        best = max(per_seed, key=lambda r: r.best_reward)
         summary["per_n"][str(n)] = {
             "max_reward": max_reward_n,
             "best_edges": best.best_edges,
-            "graphs_searched": iters * batch * seeds,
+            "graphs_searched": iters * batch * len(per_seed),
+            "seconds": round(elapsed, 1),
         }
-        summary["total_graphs_searched"] += iters * batch * seeds
+        summary["total_graphs_searched"] += iters * batch * len(per_seed)
+        per_n_times[n] = elapsed
+        actual_cap = n
 
         if max_reward_n > global_best_reward:
             global_best_reward = max_reward_n
@@ -200,7 +244,7 @@ def run(ns, seeds, iters, batch, seed, progress=True):
             status = "holds (equality reached)"
         else:
             status = "holds"
-        print(f"n={n:2d}: max reward = {max_reward_n:+.6f}  [{status}]")
+        print(f"n={n:2d}: max reward = {max_reward_n:+.6f}  [{status}]  ({elapsed:.0f}s)")
 
         if max_reward_n > EQ_TOL:
             summary["counterexample_found"] = True
@@ -208,6 +252,7 @@ def run(ns, seeds, iters, batch, seed, progress=True):
 
     summary["global_best_reward"] = global_best_reward
     summary["distinct_equality_cases"] = len(equality)
+    summary["actual_cap"] = actual_cap
 
     with open(os.path.join(OUTDIR, "summary.json"), "w") as f:
         json.dump(summary, f, indent=2)
@@ -216,12 +261,40 @@ def run(ns, seeds, iters, batch, seed, progress=True):
             {"count": len(equality), "edge_lists": list(equality.values())}, f, indent=2
         )
     make_scatter(scatter_points, os.path.join(OUTDIR, "scatter_mustar_vs_H.png"))
+    write_run_notes(ns, per_n_times, actual_cap, aborted_n, budget_seconds, summary)
 
-    print(f"\nDone. global best reward = {global_best_reward:+.6f}; "
+    print(f"\nDone. cap=n{actual_cap}; global best reward = {global_best_reward:+.6f}; "
           f"{len(equality)} distinct equality case(s); "
           f"{summary['total_graphs_searched']} graphs searched.")
     print(f"Outputs in {OUTDIR}")
     return summary
+
+
+def write_run_notes(requested_ns, per_n_times, actual_cap, aborted_n, budget, summary):
+    lines = ["# Conjecture 4 full run — notes\n"]
+    lines.append(f"- Requested n range: {requested_ns[0]}..{requested_ns[-1]}")
+    lines.append(f"- Per-n wall-clock budget: {budget}s (10 min)")
+    lines.append(f"- **Actual cap reached: n = {actual_cap}**")
+    if aborted_n is not None:
+        lines.append(f"- n = {aborted_n} exceeded the budget and was aborted "
+                     f"(not recorded). The minimum maximal matching ILP solves a CBC "
+                     f"subprocess per graph (~30-80 ms each on this machine), so the "
+                     f"~{summary['params']['iters'] * summary['params']['batch'] * summary['params']['seeds']:,} "
+                     f"evaluations per n become the bottleneck at large n.")
+    else:
+        lines.append("- No n was aborted; the full requested range completed within budget.")
+    lines.append("")
+    lines.append("## Per-n wall time (recorded n only)\n")
+    lines.append("| n | seconds | max reward |")
+    lines.append("|---|---------|------------|")
+    for n in sorted(per_n_times):
+        mr = summary["per_n"][str(n)]["max_reward"]
+        lines.append(f"| {n} | {per_n_times[n]:.0f} | {mr:+.6f} |")
+    lines.append("")
+    lines.append(f"Counterexample found: **{summary['counterexample_found']}**. "
+                 f"Global best reward: {summary['global_best_reward']:+.6e}.")
+    with open(os.path.join(OUTDIR, "RUN_NOTES.md"), "w") as f:
+        f.write("\n".join(lines) + "\n")
 
 
 def main(argv=None):
@@ -232,6 +305,9 @@ def main(argv=None):
     parser.add_argument("--iters", type=int, default=50)
     parser.add_argument("--batch", type=int, default=200)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--budget", type=float, default=600.0,
+                        help="per-n wall-clock budget in seconds; an n exceeding it is "
+                             "aborted and the cap drops to n-1 (default 600 = 10 min)")
     parser.add_argument("--smoke", action="store_true",
                         help="tiny run: n in 4..6, 2 seeds, 10 iters, batch 50")
     args = parser.parse_args(argv)
@@ -241,7 +317,8 @@ def main(argv=None):
         args.seeds, args.iters, args.batch = 2, 10, 50
 
     ns = range(args.n_min, args.n_max + 1)
-    run(ns, seeds=args.seeds, iters=args.iters, batch=args.batch, seed=args.seed)
+    run(ns, seeds=args.seeds, iters=args.iters, batch=args.batch, seed=args.seed,
+        budget_seconds=args.budget)
 
 
 if __name__ == "__main__":
