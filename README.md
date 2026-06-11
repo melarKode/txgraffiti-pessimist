@@ -44,9 +44,9 @@ plugging a conjecture-specific reward into the shared search engine:
 - **Conjecture 3** ($i \le \mu^*$) — Shubhashish
 - **Conjecture 4** ($\mu^* \le H$) — Navneet
 
-All four conjectures (including Conjecture 2) are also stated formally in Lean. The
-Conjecture 4 search is fully written up below; Conjectures 1 and 3 are searched on the
-teammates' branches with the same engine and reporting format.
+All four conjectures (including Conjecture 2) are also stated formally in Lean.
+Conjectures 1 and 4 are fully written up below (Conjecture 3 is searched on
+Shubhashish's branch with the same engine and reporting format).
 
 ---
 
@@ -87,6 +87,49 @@ silently truncated). The documented cap is therefore $n=8$; details in
 
 ---
 
+## What the Pessimist found (Conjecture 1)
+
+The same per-edge Bernoulli CEM maximises
+$\text{reward}(G) = \dfrac{a(G)+R(G)}{\Delta(G)} - \alpha(G)$ — a positive reward would be
+a counterexample to $\alpha(G) \ge (a(G)+R(G))/\Delta(G)$.
+
+| Metric | Value |
+|---|---|
+| Vertex range searched | $n = 4 \dots 22$ (see cap note below) |
+| Restarts × iterations × batch | $10 \times 50 \times 200$ per $n$ |
+| **Total graphs searched** | **1,900,000** |
+| Counterexamples found | **0** |
+| Global best reward | $0.000000$ (equality, no violation) |
+| Distinct equality cases (post WL-dedup) | **6** |
+
+**Max reward per $n$** (all $\le 0$ ⇒ conjecture holds on every searched graph; selected
+$n$, full table in [`results/conj1/RUN_NOTES.md`](results/conj1/RUN_NOTES.md)):
+
+| $n$ | 4 | 5 | 6 | 7 | 8 | 10 | 14 | 18 | 22 |
+|-----|---|---|---|---|---|----|----|----|----|
+| max reward | $0$ | $0$ | $0$ | $0$ | $-0.33$ | $-0.67$ | $-1.00$ | $-2.00$ | $-2.64$ |
+
+**Recovered extremal family.** The 6 equality ($\alpha = (a+R)/\Delta$) graphs found are
+$C_4$, $P_4$, $K_4$, $C_5$, $P_6$, $C_7$ — all small, low-degree ($\Delta \in \{2,3\}$)
+graphs, with no equality cases at $n \ge 8$. Equality appears to be a sporadic
+finite-graph phenomenon rather than an infinite family; see
+[`results/conj1/proof_attempt.md`](results/conj1/proof_attempt.md) for exact hand
+verification of the $n=3$ cases ($P_3$, $K_3$, both equality) and a noteworthy boundary
+case at $n=2$: $K_2$ gives reward $=+1$ (the literal counterexample condition), which is
+why `lean/Conjectures.lean`'s `conjecture_one` requires $n \ge 3$ rather than $n \ge 2$.
+Scatter of $\alpha$ vs $(a+R)/\Delta$ (equality cases marked):
+[`results/conj1/scatter_alpha_vs_a_plus_R_over_delta.png`](results/conj1/scatter_alpha_vs_a_plus_R_over_delta.png).
+
+**Cap note.** Conjecture 1 needs only $\alpha, a, R, \Delta$ — no CBC/ILP subprocess —
+so it is far cheaper per graph than Conjecture 4's $\mu^*$. The same hard 10-minute-per-$n$
+budget applies: $n=22$ completed in 458 s, $n=23$ exceeded the budget and was **aborted
+and excluded**. The documented cap is therefore $n=22$, nearly triple Conjecture 4's
+$n=8$; details in [`results/conj1/RUN_NOTES.md`](results/conj1/RUN_NOTES.md). At this
+range, $\alpha(G)$'s exact computation via maximal cliques of the complement graph is the
+bottleneck, not connectivity or search overhead.
+
+---
+
 ## Repository layout
 
 ```
@@ -96,10 +139,13 @@ src/
   search.py            per-edge Bernoulli cross-entropy method (the Pessimist optimiser)
 conjectures/
   conj4_minmaxmatching_harmonic.py    reward(G) = mu*(G) - H(G)
+  conj1_independence_annihilation_residue.py    reward(G) = (a(G)+R(G))/Delta(G) - alpha(G)
 experiments/
   run_conj4.py         multi-seed driver: logs, summary, equality cases, scatter, cap guard
+  run_conj1.py         same driver pattern, wired to the Conjecture 1 reward
 results/conj4/         per-(n,seed) logs, summary.json, equality_cases.json, scatter,
                        RUN_NOTES.md, proof_attempt.md
+results/conj1/         same outputs for Conjecture 1 (cap n=22)
 tests/                 pytest: invariant spot-values + theorem fuzz, codec, WL-hash dedup
 lean/                  Lean 4 project; Conjectures.lean states all four with `sorry`
 prompts/navneet.md     the verbatim build prompt
@@ -122,6 +168,10 @@ python experiments/run_conj4.py --smoke
 # Full run (per-n 10-min budget; auto-caps and documents in RUN_NOTES.md)
 python experiments/run_conj4.py
 
+# Smoke / full run on Conjecture 1 (cap reaches n=22; <10 min total)
+python experiments/run_conj1.py --smoke
+python experiments/run_conj1.py
+
 # Standalone CEM engine (default objective = Conjecture 4 reward)
 python src/search.py --n 7 --iters 50 --batch 200 --seeds 10 --seed 0
 ```
@@ -139,6 +189,16 @@ lake build             # type-checks Conjectures.lean against Mathlib
 v4.30.0). It declares the eight graph invariants as `opaque` constants over
 `SimpleGraph V` and states all four conjectures as theorems, each closed with `sorry`
 (the statements type-check; the proofs are open — these are open conjectures).
+
+**Open question for the team:** `conjecture_one`'s current hypothesis
+`2 ≤ Fintype.card V` is arguably too weak for the statement to be true as written —
+for `K₂` (the connected graph on 2 vertices), $\alpha=1$ but $(a+R)/\Delta = 2$, so the
+inequality fails for `K₂`. See
+[`results/conj1/proof_attempt.md`](results/conj1/proof_attempt.md) for the exact
+computation and a proposed fix (`3 ≤ Fintype.card V`, matching "nontrivial connected
+graph" and the search range $n \ge 4$). This file builds successfully either way
+(`conjecture_one` is still closed with `sorry`); the hypothesis itself was left
+unchanged pending the team's decision.
 
 ---
 
@@ -173,7 +233,7 @@ implementation before any code was written; the full build prompt is preserved v
 | Member | Contribution |
 |--------|--------------|
 | Navneet | Infrastructure (invariants, CEM engine, experiment harness, Lean project) + Conjecture 4 search |
-| Tridiv | Conjecture 1 ($\alpha \ge (a+R)/\Delta$) |
+| Tridiv | Conjecture 1 ($\alpha \ge (a+R)/\Delta$), search to $n=22$, equality family + $K_2$ boundary case |
 | Shubhashish | Conjecture 3 ($i \le \mu^*$) |
 
 ## References
