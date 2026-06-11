@@ -165,8 +165,8 @@ implementation before any code was written; the full build prompt is preserved v
 | Member | Contribution |
 |--------|--------------|
 | Navneet | Infrastructure (invariants, CEM engine, experiment harness, Lean project) + Conjecture 4 search |
-| \<teammate2\> | Conjecture 1 ($\alpha \ge (a+R)/\Delta$) |
-| \<teammate3\> | Conjecture 3 ($i \le \mu^*$) |
+| Tridiv | Conjecture 1 ($\alpha \ge (a+R)/\Delta$) |
+| Shubhashish | Conjecture 3 ($i \le \mu^*$) |
 
 ## References
 
