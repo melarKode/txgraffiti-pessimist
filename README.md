@@ -45,8 +45,7 @@ plugging a conjecture-specific reward into the shared search engine:
 - **Conjecture 4** ($\mu^* \le H$) — Navneet
 
 All four conjectures (including Conjecture 2) are also stated formally in Lean.
-Conjectures 1 and 4 are fully written up below (Conjecture 3 is searched on
-Shubhashish's branch with the same engine and reporting format).
+Conjectures 1, 3, and 4 are fully written up below.
 
 ---
 
@@ -130,23 +129,71 @@ bottleneck, not connectivity or search overhead.
 
 ---
 
+## What the Pessimist found (Conjecture 3)
+
+Conjecture 3 is hypothesised **only for $r$-regular graphs**, a structurally rigid subset
+the per-edge Bernoulli CEM would essentially never sample by chance. This target therefore
+uses a dedicated **$(\mu+\lambda)$ evolutionary search over $r$-regular graphs**
+(`search.run_regular_search`): a population seeded by `regular_sampler` and bred with the
+degree-preserving `regular_mutator` (a double edge swap), which keeps every child exactly
+$r$-regular. Reward $=i(G)-\mu^*(G)$ — a positive reward would be a counterexample.
+
+| Metric | Value |
+|---|---|
+| Cells searched | $r=3$ ($n\in\{4,6,8\}$), $r=4$ ($n\in\{5,6\}$) |
+| Restarts × iterations × batch | $10 \times 50 \times 200$ per cell |
+| **Total graphs searched** | **502,000** |
+| Counterexamples found | **0** |
+| Global best reward | $0$ (equality, no violation) |
+| Distinct equality cases (post WL-dedup) | **3** |
+
+**Max reward per cell** (all $\le 0$ ⇒ conjecture holds on every searched graph):
+
+| $(n,r)$ | $(4,3)$ | $(6,3)$ | $(8,3)$ | $(5,4)$ | $(6,4)$ |
+|---------|---------|---------|---------|---------|---------|
+| max reward | $-1$ | $0$ | $0$ | $-1$ | $0$ |
+
+**Recovered extremal family.** The three equality ($i = \mu^*$) graphs found are the
+**triangular prism** ($n=6, r=3$), a **cubic graph on 8 vertices** with a single triangle,
+and the **octahedron $K_{2,2,2}$** ($n=6, r=4$) — all connected and **well-covered**
+($\alpha = i$, i.e. every maximal independent set has the same size).
+[`results/conj3/proof_attempt.md`](results/conj3/proof_attempt.md) proves two exact
+subfamilies: $K_{r+1}$ satisfies $i \le \mu^*$ (equality iff $r \le 2$) and **$K_{r,r}$ is
+an infinite equality family** ($i = \mu^* = r$, covering $K_2$, $C_4$, $K_{3,3}$), and
+verifies every recovered case by hand. Scatter of $i$ vs $\mu^*$ (equality cases marked):
+[`results/conj3/scatter_i_vs_mustar.png`](results/conj3/scatter_i_vs_mustar.png).
+
+**Cap note.** For an $r$-regular graph $\lvert E\rvert = nr/2$, and $\mu^*$ is computed
+*exactly* by brute force while $\lvert E\rvert \le 12$. The sweep stays on that brute-force
+frontier ($r=3 \Rightarrow n \le 8$, $r=4 \Rightarrow n \le 6$), so every cell finished in
+$\le 34$ s — far under the per-cell 10-minute budget. Cells above the frontier fall back on
+the CBC ILP path and can be enabled with `--allow-ilp`. Per-cell timings and the
+reproducible equality table are in
+[`results/conj3/RUN_NOTES.md`](results/conj3/RUN_NOTES.md).
+
+---
+
 ## Repository layout
 
 ```
 src/
   invariants.py        exact graph invariants (alpha, i, mu*, residue, annihilation, H)
   graphclasses.py      bitstring<->graph codec; regular sampler & degree-preserving mutator
-  search.py            per-edge Bernoulli cross-entropy method (the Pessimist optimiser)
+  search.py            per-edge Bernoulli CEM + (mu+lambda) regular-graph search (Conj 3)
 conjectures/
   conj4_minmaxmatching_harmonic.py    reward(G) = mu*(G) - H(G)
   conj1_independence_annihilation_residue.py    reward(G) = (a(G)+R(G))/Delta(G) - alpha(G)
+  conj3_independence_domination_minmaxmatching.py    reward(G) = i(G) - mu*(G)
 experiments/
   run_conj4.py         multi-seed driver: logs, summary, equality cases, scatter, cap guard
   run_conj1.py         same driver pattern, wired to the Conjecture 1 reward
+  run_conj3.py         (n,r)-cell driver over r-regular graphs (per-r cap, --allow-ilp guard)
 results/conj4/         per-(n,seed) logs, summary.json, equality_cases.json, scatter,
                        RUN_NOTES.md, proof_attempt.md
 results/conj1/         same outputs for Conjecture 1 (cap n=22)
-tests/                 pytest: invariant spot-values + theorem fuzz, codec, WL-hash dedup
+results/conj3/         per-(n,r,seed) logs + same outputs for Conjecture 3 (frontier nr/2<=12)
+tests/                 pytest: invariant spot-values + theorem fuzz, codec, WL-hash dedup,
+                       regular-search structure (test_search.py), Conjecture 3 (test_conj3.py)
 lean/                  Lean 4 project; Conjectures.lean states all four with `sorry`
 prompts/navneet.md     the verbatim build prompt
 ```
@@ -171,6 +218,10 @@ python experiments/run_conj4.py
 # Smoke / full run on Conjecture 1 (cap reaches n=22; <10 min total)
 python experiments/run_conj1.py --smoke
 python experiments/run_conj1.py
+
+# Smoke / full run on Conjecture 3 (r-regular search; ~2 min on the brute-force frontier)
+python experiments/run_conj3.py --smoke
+python experiments/run_conj3.py --r-values 3,4 --n-max 8
 
 # Standalone CEM engine (default objective = Conjecture 4 reward)
 python src/search.py --n 7 --iters 50 --batch 200 --seeds 10 --seed 0
@@ -214,7 +265,9 @@ unchanged pending the team's decision.
   samples a batch of graphs each iteration, decodes via the bitstring codec, scores them,
   and refits $p$ toward the top-10% elite frequencies (lr 0.7, additive noise 0.05, clipped
   to $[0.02,0.98]$). Disconnected graphs receive reward $-10^6$, steering the optimiser into
-  the feasible region without any conjecture-specific hack.
+  the feasible region without any conjecture-specific hack. Conjecture 3, whose hypothesis is
+  $r$-regularity, instead uses a $(\mu+\lambda)$ evolutionary search that stays inside the
+  $r$-regular subspace via degree-preserving double-edge-swap mutations (`run_regular_search`).
 - **Counterexample protocol.** Any reward exceeding the equality tolerance triggers a full
   provenance dump (`COUNTEREXAMPLE_<ts>.json`), independent re-verification of every
   invariant (brute force where feasible, plus the line-graph cross-method and a fresh ILP),
@@ -225,8 +278,9 @@ unchanged pending the team's decision.
 ## AI agent
 
 Built with **Claude Code (Claude Opus)**. **Plan mode** was used to scope and approve the
-implementation before any code was written; the full build prompt is preserved verbatim in
-[`prompts/navneet.md`](prompts/navneet.md).
+implementation before any code was written; the full build prompts are preserved verbatim in
+[`prompts/navneet.md`](prompts/navneet.md) (infrastructure + Conjecture 4) and
+[`prompts/shubhashish.md`](prompts/shubhashish.md) (Conjecture 3).
 
 ## Team
 
@@ -234,7 +288,7 @@ implementation before any code was written; the full build prompt is preserved v
 |--------|--------------|
 | Navneet | Infrastructure (invariants, CEM engine, experiment harness, Lean project) + Conjecture 4 search |
 | Tridiv | Conjecture 1 ($\alpha \ge (a+R)/\Delta$), search to $n=22$, equality family + $K_2$ boundary case |
-| Shubhashish | Conjecture 3 ($i \le \mu^*$) |
+| Shubhashish | Conjecture 3 ($i \le \mu^*$): $(\mu+\lambda)$ regular-graph search; 0 counterexamples; $K_{r,r}$ infinite equality family + well-covered extremal cases |
 
 ## References
 
