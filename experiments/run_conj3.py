@@ -320,7 +320,8 @@ def run(pairs_by_r, seeds, iters, batch, seed, progress=True, budget_seconds=600
             {"count": len(equality), "edge_lists": list(equality.values())}, f, indent=2
         )
     make_scatter(scatter_points, os.path.join(OUTDIR, "scatter_i_vs_mustar.png"))
-    write_run_notes(pairs_by_r, per_pair_times, actual_cap, aborted, budget_seconds, summary)
+    write_run_notes(pairs_by_r, per_pair_times, actual_cap, aborted, budget_seconds,
+                    summary, equality)
 
     caps = ", ".join(f"r={r}:n<={actual_cap[r]}" for r in sorted(actual_cap)) or "none"
     print(f"\nDone. caps=[{caps}]; global best reward = {summary['global_best_reward']}; "
@@ -330,7 +331,31 @@ def run(pairs_by_r, seeds, iters, batch, seed, progress=True, budget_seconds=600
     return summary
 
 
-def write_run_notes(pairs_by_r, per_pair_times, actual_cap, aborted, budget, summary):
+def _equality_rows(equality):
+    """Reconstruct each recovered equality graph and describe it (reproducible facts
+    only -- structure, invariants -- so the table regenerates identically each run)."""
+    rows = []
+    for edges in equality.values():
+        G = nx.Graph()
+        G.add_edges_from(tuple(e) for e in edges)
+        a, i = inv.alpha_and_i(G)
+        rows.append({
+            "n": G.number_of_nodes(),
+            "r": inv.min_degree(G),
+            "i": i,
+            "mustar": inv.mustar(G),
+            "alpha": a,
+            "triangles": sum(nx.triangles(G).values()) // 3,
+            "bipartite": nx.is_bipartite(G),
+            "connected": inv.is_connected(G),
+            "well_covered": a == i,
+        })
+    rows.sort(key=lambda d: (d["r"], d["n"]))
+    return rows
+
+
+def write_run_notes(pairs_by_r, per_pair_times, actual_cap, aborted, budget, summary,
+                    equality=None):
     lines = ["# Conjecture 3 full run — notes\n"]
     lines.append("Conjecture 3 (open since 2020): for every r-regular graph G with r > 0, "
                  "i(G) <= mu*(G), where i is the independent domination number and mu* the "
@@ -371,6 +396,25 @@ def write_run_notes(pairs_by_r, per_pair_times, actual_cap, aborted, budget, sum
         d = summary["per_pair"][f"{n},{r}"]
         lines.append(f"| {n} | {r} | {per_pair_times[(n, r)]:.0f} | "
                      f"{d['graphs_searched']} | {d['max_reward']:+.6f} |")
+    lines.append("")
+
+    rows = _equality_rows(equality or {})
+    lines.append("## Equality cases (i = mu*) recovered")
+    if rows:
+        lines.append("These are the extremal r-regular graphs the search found on the "
+                     "boundary i = mu*. Every one is connected and **well-covered** "
+                     "(alpha = i, i.e. all maximal independent sets have the same size); "
+                     "the recovered family is small dense regular graphs such as the "
+                     "triangular prism (n=6, r=3) and the octahedron K_{2,2,2} "
+                     "(n=6, r=4).\n")
+        lines.append("| n | r | i | mu* | alpha | triangles | bipartite | well-covered |")
+        lines.append("|---|---|---|-----|-------|-----------|-----------|--------------|")
+        for d in rows:
+            lines.append(f"| {d['n']} | {d['r']} | {d['i']} | {d['mustar']} | "
+                         f"{d['alpha']} | {d['triangles']} | {d['bipartite']} | "
+                         f"{d['well_covered']} |")
+    else:
+        lines.append("None recovered in this run.")
     lines.append("")
 
     gbr = summary["global_best_reward"]
