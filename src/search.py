@@ -60,6 +60,38 @@ class CEMResult:
         }
 
 
+@dataclass
+class RegularSearchResult:
+    """Result of one regular-graph evolutionary-search restart.
+
+    Deliberately a superset of CEMResult (same field names + `r` and `evaluations`)
+    so experiments/run_conj3.py can consume it exactly like run_conj4.py consumes a
+    CEMResult: `.to_json()`, `.best_graph`, `.equality_graphs`, `.best_reward`,
+    `.best_edges`.
+    """
+
+    n: int
+    r: int
+    best_reward: float
+    best_edges: list                       # sorted edge list of the best graph
+    equality_edges: list = field(default_factory=list)   # list of sorted edge lists
+    log: list = field(default_factory=list)              # per-generation stats
+    evaluations: int = 0                   # number of reward evaluations performed
+    best_graph: nx.Graph = None            # not serialised
+    equality_graphs: list = field(default_factory=list)  # not serialised
+
+    def to_json(self) -> dict:
+        return {
+            "n": self.n,
+            "r": self.r,
+            "best_reward": self.best_reward,
+            "best_edges": self.best_edges,
+            "equality_edges": self.equality_edges,
+            "evaluations": self.evaluations,
+            "log": self.log,
+        }
+
+
 # --------------------------------------------------------------------------- #
 # Core CEM
 # --------------------------------------------------------------------------- #
@@ -191,6 +223,136 @@ def run_search(
 
     best_result = max(per_seed, key=lambda r: r.best_reward)
     return best_result, per_seed
+
+
+# --------------------------------------------------------------------------- #
+# Regular-graph search (Conjecture 3)
+# --------------------------------------------------------------------------- #
+# The Bernoulli-edge CEM above samples arbitrary graphs and would essentially never
+# land on an r-regular one by chance, so it cannot search Conjecture 3's hypothesis
+# space. Instead we stay inside the r-regular subspace using degree-preserving moves:
+# gc.regular_sampler seeds r-regular graphs and gc.regular_mutator (a double edge swap)
+# keeps every vertex at degree r. This is additive infrastructure -- run_cem/run_search
+# above are unchanged.
+def run_regular_search(
+    n: int,
+    r: int,
+    reward_fn,
+    iters: int,
+    batch: int,
+    rng: np.random.Generator,
+    require_connected: bool = True,
+    progress: bool = True,
+    desc: str = "reg",
+    mu: int = None,
+    lam: int = None,
+    n_swaps: int = 1,
+    connect_tries: int = 20,
+) -> RegularSearchResult:
+    """One (mu + lambda) evolutionary-search restart over r-regular graphs on n vertices.
+
+    Maintains a population of `mu` r-regular graphs; each generation breeds `lam`
+    children via `regular_mutator` (degree-preserving double edge swaps), scores
+    everyone with `evaluate`, and keeps the best `mu` (parents and children together)
+    as the next generation. Tracks the best-ever graph/reward and all equality cases
+    (|reward| < EQUALITY_TOL, WL-deduped) exactly like run_cem.
+
+    `mu`/`lam` default to values derived from `batch` so the experiment CLI can stay
+    parallel to the CEM drivers (lam = batch, mu = max(4, batch // 5)). When
+    `require_connected`, the initial population is resampled (up to `connect_tries`
+    per seed) to favour connected graphs; mutation+selection handle the rest.
+    """
+    if lam is None:
+        lam = batch
+    if mu is None:
+        mu = max(4, batch // 5)
+
+    evaluations = 0
+    best_reward = -np.inf
+    best_graph = None
+    equality_graphs = []
+    equality_hashes = set()
+    log = []
+
+    def score(G):
+        nonlocal evaluations
+        evaluations += 1
+        return evaluate(G, reward_fn, require_connected)
+
+    def consider(reward, G):
+        nonlocal best_reward, best_graph
+        if reward > best_reward:
+            best_reward = reward
+            best_graph = G
+        if abs(reward) < EQUALITY_TOL:
+            h = nx.weisfeiler_lehman_graph_hash(G)
+            if h not in equality_hashes:
+                equality_hashes.add(h)
+                equality_graphs.append(G)
+
+    def make_seed():
+        G = gc.regular_sampler(n, r, rng)
+        if require_connected:
+            for _ in range(connect_tries):
+                if inv.is_connected(G):
+                    break
+                G = gc.regular_sampler(n, r, rng)
+        return G
+
+    # Initial population.
+    population = []  # list of (reward, graph); sorted by reward via an explicit key
+    for _ in range(mu):
+        G = make_seed()
+        rew = score(G)
+        consider(rew, G)
+        population.append((rew, G))
+
+    iterator = range(iters)
+    if progress:
+        iterator = tqdm(iterator, desc=desc, leave=False)
+
+    for it in iterator:
+        children = []
+        for _ in range(lam):
+            parent = population[int(rng.integers(0, len(population)))][1]
+            child = parent
+            for _ in range(n_swaps):
+                child = gc.regular_mutator(child, rng)
+            rew = score(child)
+            consider(rew, child)
+            children.append((rew, child))
+
+        # (mu + lambda) selection: keep the best mu of parents + children. Sort by an
+        # explicit key so equal rewards never trigger an (unorderable) Graph comparison.
+        combined = population + children
+        combined.sort(key=lambda t: t[0], reverse=True)
+        population = combined[:mu]
+
+        gen_rewards = [rew for rew, _ in (children if children else population)]
+        log.append(
+            {
+                "iter": it,
+                "max": float(np.max(gen_rewards)),
+                "mean": float(np.mean(gen_rewards)),
+                "median": float(np.median(gen_rewards)),
+            }
+        )
+        if progress:
+            iterator.set_postfix(best=f"{best_reward:.4f}")
+
+    return RegularSearchResult(
+        n=n,
+        r=r,
+        best_reward=float(best_reward),
+        best_edges=sorted(tuple(sorted(e)) for e in best_graph.edges()) if best_graph else [],
+        equality_edges=[
+            sorted(tuple(sorted(e)) for e in G.edges()) for G in equality_graphs
+        ],
+        log=log,
+        evaluations=evaluations,
+        best_graph=best_graph,
+        equality_graphs=equality_graphs,
+    )
 
 
 # --------------------------------------------------------------------------- #
